@@ -11,8 +11,46 @@
 #include "ylt/coro_io/coro_io.hpp"
 #include "ylt/coro_io/io_context_pool.hpp"
 #include "ylt/coro_io/load_blancer.hpp"
+#if __has_include(<ylt/easylog.hpp>)
+#include <ylt/easylog.hpp>
+#endif
 
 namespace cinatra {
+
+// Returns "::" if the system supports IPv6, "0.0.0.0" otherwise.
+// Result is cached after the first call.
+inline const std::string& default_bind_address() {
+  static const std::string addr = [] {
+    struct addrinfo hints = {}, *result = nullptr;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+    if (::getaddrinfo(nullptr, "0", &hints, &result) != 0 || !result) {
+      return std::string("0.0.0.0");
+    }
+    bool has_ipv6 = false;
+    for (auto *rp = result; rp; rp = rp->ai_next) {
+      if (rp->ai_family == AF_INET6) {
+        has_ipv6 = true;
+        break;
+      }
+    }
+    ::freeaddrinfo(result);
+    if (has_ipv6) {
+      asio::error_code ec;
+      asio::io_context ctx;
+      asio::ip::tcp::socket sock(ctx);
+      sock.open(asio::ip::tcp::v6(), ec);
+      if (!ec) {
+        sock.close(ec);
+        return std::string("::");
+      }
+    }
+    return std::string("0.0.0.0");
+  }();
+  return addr;
+}
+
 enum class file_resp_format_type {
   chunked,
   range,
@@ -20,19 +58,20 @@ enum class file_resp_format_type {
 class coro_http_server {
  public:
   coro_http_server(asio::io_context &ctx, unsigned short port,
-                   std::string address = "0.0.0.0")
+                   std::string address = default_bind_address())
       : out_ctx_(&ctx), port_(port), acceptor_(ctx), check_timer_(ctx) {
     init_address(std::move(address));
   }
 
   coro_http_server(asio::io_context &ctx,
-                   std::string address /* = "0.0.0.0:9001" */)
+                   std::string address /* = "[::]:9001" */)
       : out_ctx_(&ctx), acceptor_(ctx), check_timer_(ctx) {
     init_address(std::move(address));
   }
 
   coro_http_server(size_t thread_num, unsigned short port,
-                   std::string address = "0.0.0.0", bool cpu_affinity = false)
+                   std::string address = default_bind_address(),
+                   bool cpu_affinity = false)
       : pool_(std::make_unique<coro_io::io_context_pool>(thread_num,
                                                          cpu_affinity)),
         port_(port),
@@ -42,7 +81,7 @@ class coro_http_server {
   }
 
   coro_http_server(size_t thread_num,
-                   std::string address /* = "0.0.0.0:9001" */,
+                   std::string address /* = "[::]:9001" */,
                    bool cpu_affinity = false)
       : pool_(std::make_unique<coro_io::io_context_pool>(thread_num,
                                                          cpu_affinity)),
@@ -945,28 +984,54 @@ class coro_http_server {
     response.set_delay(true);
   }
 
+  static bool parse_port(std::string_view s, uint16_t &port) {
+    auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), port, 10);
+    return ec == std::errc{} && ptr == s.data() + s.size();
+  }
+
+  // Splits an address string into host and optional port.
+  // Accepted formats:
+  //   "host"           -> host only
+  //   "host:port"      -> IPv4 or hostname with port
+  //   "[ipv6]:port"    -> bracketed IPv6 with port
+  //   "[ipv6]"         -> bracketed IPv6, no port
+  //   "::1"            -> bare IPv6 (multiple colons), no port
   void init_address(std::string address) {
 #if __has_include(<ylt/easylog.hpp>)
     easylog::logger<>::instance();  // init easylog singleton to make sure
                                     // server destruct before easylog.
 #endif
 
-    if (size_t pos = address.find(':'); pos != std::string::npos) {
-      auto port_sv = std::string_view(address).substr(pos + 1);
+    std::string host;
+    std::string_view port_str;
 
-      uint16_t port;
-      auto [ptr, ec] = std::from_chars(
-          port_sv.data(), port_sv.data() + port_sv.size(), port, 10);
-      if (ec != std::errc{}) {
-        address_ = std::move(address);
-        return;
+    if (!address.empty() && address.front() == '[') {
+      auto closing = address.find(']');
+      if (closing != std::string::npos) {
+        host = address.substr(1, closing - 1);
+        if (closing + 2 < address.size() && address[closing + 1] == ':')
+          port_str = std::string_view(address).substr(closing + 2);
       }
-
-      port_ = port;
-      address = address.substr(0, pos);
+    }
+    else {
+      auto first = address.find(':');
+      if (first == std::string::npos) {
+        host = std::move(address);  // plain hostname, no port
+      }
+      else if (address.find(':', first + 1) != std::string::npos) {
+        host = std::move(address);  // bare IPv6 (multiple colons), no port
+      }
+      else {
+        host = address.substr(0, first);
+        port_str = std::string_view(address).substr(first + 1);
+      }
     }
 
-    address_ = std::move(address);
+    address_ = std::move(host);
+
+    uint16_t port;
+    if (!port_str.empty() && parse_port(port_str, port))
+      port_ = port;
   }
 
  private:

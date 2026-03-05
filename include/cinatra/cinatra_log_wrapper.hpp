@@ -1,6 +1,21 @@
 #pragma once
 #include <iostream>
+#include <string>
+#include <string_view>
 namespace cinatra {
+
+inline std::string format_host_port(std::string_view host,
+                                    std::string_view port) {
+  std::string result;
+  if (host.find(':') != std::string_view::npos) {
+    result.append("[").append(host).append("]");
+  }
+  else {
+    result.append(host);
+  }
+  result.append(":").append(port);
+  return result;
+}
 struct null_logger_t {
   template <typename T>
   const null_logger_t& operator<<(T&&) const {

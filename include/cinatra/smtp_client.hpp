@@ -31,7 +31,8 @@ class client {
         co_await coro_io::async_connect(io_context_, socket_, host, port);
 
     if (ec) {
-      std::cerr << "connect host: " << host << ":" << port << " failed\n";
+      std::cerr << "connect " << cinatra::format_host_port(host, port)
+                << " failed\n";
       co_return false;
     }
 

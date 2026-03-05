@@ -1512,20 +1512,16 @@ class coro_http_client : public std::enable_shared_from_this<coro_http_client> {
       if (!proxy_request_uri_.empty())
         proxy_request_uri_.clear();
       if (u.get_port() == "80") {
-        proxy_request_uri_.append("http://").append(u.get_host()).append(":80");
+        proxy_request_uri_.append("http://");
       }
       else if (u.get_port() == "443") {
-        proxy_request_uri_.append("https://")
-            .append(u.get_host())
-            .append(":443");
+        proxy_request_uri_.append("https://");
       }
       else {
-        // all be http
-        proxy_request_uri_.append("http://")
-            .append(u.get_host())
-            .append(":")
-            .append(u.get_port());
+        proxy_request_uri_.append("http://");
       }
+      proxy_request_uri_.append(
+          format_host_port(u.get_host(), u.get_port()));
       proxy_request_uri_.append(u.get_path());
       u.path = std::string_view(proxy_request_uri_);
     }

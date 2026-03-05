@@ -133,8 +133,9 @@ class client_pool : public std::enable_shared_from_this<
     uint32_t i = UINT32_MAX;  // (at least connect once)
     do {
       CINATRA_LOG_TRACE << "try to reconnect client{" << client.get()
-                        << "},host:{" << client->get_host() << ":"
-                        << client->get_port() << "}, try count:" << i + 1
+                        << "}, "
+                        << cinatra::format_host_port(client->get_host(), client->get_port())
+                        << ", try count:" << i + 1
                         << "max retry limit:"
                         << self->pool_config_.connect_retry_count;
       auto [ok, cost_time] = co_await reconnect_impl(client, self);
@@ -153,9 +154,9 @@ class client_pool : public std::enable_shared_from_this<
       self = watcher.lock();
       ++i;
     } while (i < self->pool_config_.connect_retry_count);
-    CINATRA_LOG_WARNING << "reconnect client{" << client.get() << "},host:{"
-                        << client->get_host() << ":" << client->get_port()
-                        << "} out of max limit, stop retry. connect failed";
+    CINATRA_LOG_WARNING << "reconnect client{" << client.get() << "}, "
+                        << cinatra::format_host_port(client->get_host(), client->get_port())
+                        << " out of max limit, stop retry. connect failed";
     alive_detect(client->get_config(), std::move(self)).start([](auto&&) {
     });
     client = nullptr;

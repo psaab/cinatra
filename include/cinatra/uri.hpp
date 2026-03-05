@@ -227,7 +227,12 @@ class uri_t {
     return true;
   }
 
-  std::string get_host() const { return std::string(host); }
+  std::string get_host() const {
+    if (host.size() >= 2 && host.front() == '[' && host.back() == ']') {
+      return std::string(host.substr(1, host.size() - 2));
+    }
+    return std::string(host);
+  }
 
   std::string get_port() const {
     std::string port_str;
